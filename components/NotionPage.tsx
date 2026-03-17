@@ -40,6 +40,15 @@ export default function NotionPage({
   recordMap: ExtendedRecordMap
   rootPageId?: string
 }) {
+  React.useEffect(() => {
+    document.querySelectorAll('details.notion-toggle').forEach((el) => {
+      const summary = el.querySelector('summary')
+      if (summary?.textContent?.includes('oopy:hide')) {
+        (el as HTMLElement).style.display = 'none'
+      }
+    })
+  }, [recordMap])
+
   return (
     <NotionRenderer
       recordMap={recordMap}

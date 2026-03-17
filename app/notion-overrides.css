@@ -1,5 +1,17 @@
 /* react-notion-x 렌더링 교정 CSS */
 
+/* 페이지 최대 너비 확장 */
+:root {
+  --notion-max-width: min(900px, 96vw);
+}
+
+/* 날짜 한 줄로 표시 */
+.notion-list-item-property .notion-property-date,
+.notion-list-item-property .notion-property-created_time,
+.notion-list-item-property .notion-property-last_edited_time {
+  white-space: nowrap;
+}
+
 /* 가로 스크롤 방지 */
 .notion-collection,
 .notion-collection-view-tabs-row,
