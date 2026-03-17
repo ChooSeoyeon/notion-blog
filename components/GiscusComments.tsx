@@ -11,9 +11,9 @@ export default function GiscusComments() {
     const script = document.createElement('script')
     script.src = 'https://giscus.app/client.js'
     script.setAttribute('data-repo', 'ChooSeoyeon/notion-blog-comment')
-    script.setAttribute('data-repo-id', '')
+    script.setAttribute('data-repo-id', 'R_kgDORpy4Jw')
     script.setAttribute('data-category', 'General')
-    script.setAttribute('data-category-id', '')
+    script.setAttribute('data-category-id', 'DIC_kwDORpy4J84C4owj')
     script.setAttribute('data-mapping', 'pathname')
     script.setAttribute('data-strict', '0')
     script.setAttribute('data-reactions-enabled', '1')
