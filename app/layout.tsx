@@ -6,6 +6,9 @@ import './notion-overrides.css'
 export const metadata: Metadata = {
   title: 'Blog',
   description: 'My Notion Blog',
+  verification: {
+    google: 'e5mzPc99PGXSCxFoIO86FcIBgLBd32DVyvUBpA_kedU',
+  },
 }
 
 export default function RootLayout({
