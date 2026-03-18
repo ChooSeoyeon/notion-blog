@@ -12,6 +12,11 @@
   white-space: nowrap;
 }
 
+/* 데이터베이스 뷰 탭 숨김 */
+.notion-collection-view-tabs-row {
+  display: none !important;
+}
+
 /* 가로 스크롤 방지 */
 .notion-collection,
 .notion-collection-view-tabs-row,
