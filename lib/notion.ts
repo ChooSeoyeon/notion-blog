@@ -19,11 +19,36 @@ function applyPropertyFilters(
     return propertyFilters.every(({ filter: { filter, property } }) => {
       const propValue = block?.properties?.[property] as string[][] | undefined
       const text = propValue?.[0]?.[0]
-      if (filter.operator === 'checkbox_is') {
-        const expected = filter.value?.value === true ? 'Yes' : 'No'
-        return text === expected
+      switch (filter.operator) {
+        case 'checkbox_is': {
+          const expected = filter.value?.value === true ? 'Yes' : 'No'
+          return text === expected
+        }
+        case 'enum_is':
+          return text === filter.value?.value
+        case 'enum_is_not':
+          return text !== filter.value?.value
+        case 'multi_select_contains': {
+          if (!propValue?.length) return false
+          const value = filter.value?.value as string
+          return propValue.some((seg) => {
+            const t = seg[0]
+            if (!t) return false
+            return t === value || t.split(',').some((v: string) => v.trim() === value)
+          })
+        }
+        case 'multi_select_does_not_contain': {
+          if (!propValue?.length) return true
+          const value = filter.value?.value as string
+          return !propValue.some((seg) => {
+            const t = seg[0]
+            if (!t) return false
+            return t === value || t.split(',').some((v: string) => v.trim() === value)
+          })
+        }
+        default:
+          return true
       }
-      return true
     })
   })
 }
