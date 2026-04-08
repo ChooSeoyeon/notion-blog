@@ -43,8 +43,31 @@ function fixGroupedCollectionData(recordMap: ExtendedRecordMap) {
 
       if (!groups?.length) continue
 
-      const allBlockIds = (data.collection_group_results as Record<string, unknown>)?.blockIds as string[] | undefined
-      if (!allBlockIds?.length) continue
+      const rawBlockIds = (data.collection_group_results as Record<string, unknown>)?.blockIds as string[] | undefined
+      if (!rawBlockIds?.length) continue
+
+      // 뷰의 property_filters를 클라이언트에서 직접 적용 (Notion API가 필터를 누락하는 경우 대비)
+      const propertyFilters = (view?.format as Record<string, unknown>)?.property_filters as Array<{
+        filter: { filter: { operator: string; value?: { value: unknown } }; property: string }
+      }> | undefined
+
+      const allBlockIds = propertyFilters?.length
+        ? rawBlockIds.filter((blockId) => {
+            const blockEntry = recordMap.block[blockId] as Record<string, unknown>
+            const block = ((blockEntry?.value as Record<string, unknown>)?.value ?? blockEntry?.value) as Record<string, unknown>
+            return propertyFilters.every(({ filter: { filter, property } }) => {
+              const propValue = (block?.properties as Record<string, string[][]>)?.[property]
+              const text = propValue?.[0]?.[0]
+              if (filter.operator === 'checkbox_is') {
+                const expected = filter.value?.value === true ? 'Yes' : 'No'
+                return text === expected
+              }
+              return true
+            })
+          })
+        : rawBlockIds
+
+      if (!allBlockIds.length) continue
 
       for (const group of groups) {
         const { property, value: { value: groupValue, type } } = group
