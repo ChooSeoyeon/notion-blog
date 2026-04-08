@@ -9,10 +9,9 @@ type PropertyFilter = {
 
 function applyPropertyFilters(
   blockIds: string[],
-  propertyFilters: PropertyFilter[] | undefined,
+  propertyFilters: PropertyFilter[],
   recordMap: ExtendedRecordMap,
 ): string[] {
-  if (!propertyFilters?.length) return blockIds
   return blockIds.filter((blockId) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const blockEntry = recordMap.block[blockId] as any
@@ -31,22 +30,43 @@ function applyPropertyFilters(
 
 /**
  * Notion API가 collection_group_results에 필터/그룹 결과를 누락하는 문제를 클라이언트에서 보정.
- * 1. property_filters를 collection_group_results.blockIds에 직접 적용 (모든 뷰)
- * 2. 그룹화된 뷰는 per-group 키(results:type:value)를 추가 (홈 리스트뷰용)
+ * 1. 각 컬렉션의 published 필터(checkbox_is=true)를 collection_view에서 찾아 적용
+ * 2. 그룹화된 뷰는 per-group 키(results:type:value)도 추가
  */
 function fixCollectionData(recordMap: ExtendedRecordMap) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const collectionQuery = recordMap.collection_query as unknown as Record<string, Record<string, Record<string, any>>>
   if (!collectionQuery) return
 
-  // 각 collection_view 블록의 첫번째 뷰 ID만 수집
+  // 각 collection_view 블록의 첫번째 뷰 ID 수집
   const firstViewIds = new Set<string>()
-  for (const blockEntry of Object.values(recordMap.block)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const block = ((blockEntry as any)?.value as any)?.value ?? (blockEntry as any)?.value
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const blockEntry of Object.values(recordMap.block) as any[]) {
+    const block = blockEntry?.value?.value ?? blockEntry?.value
     if (block?.type === 'collection_view' || block?.type === 'collection_view_page') {
       const viewIds = block.view_ids as string[] | undefined
       if (viewIds?.length) firstViewIds.add(viewIds[0])
+    }
+  }
+
+  // collection_view에서 collectionId별 published 필터(checkbox_is=true) 찾기
+  // 뷰의 format.collection_pointer.id 또는 query2 등에서 collection_id를 찾기 어려우므로
+  // collection_query의 collectionId를 키로 사용하여 관련 뷰를 역으로 찾음
+  const collectionPublishedFilters: Record<string, PropertyFilter[]> = {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const [, viewEntry] of Object.entries(recordMap.collection_view) as any[]) {
+    const view = viewEntry?.value?.value ?? viewEntry?.value
+    const filters = view?.format?.property_filters as PropertyFilter[] | undefined
+    if (!filters?.length) continue
+    // checkbox_is=true 필터만 (published 필터)
+    const publishedFilters = filters.filter(
+      (f) => f.filter.filter.operator === 'checkbox_is' && f.filter.filter.value?.value === true
+    )
+    if (!publishedFilters.length) continue
+    // 이 뷰가 속한 collection_id 찾기 (collection_query 키와 대조)
+    const collectionPointerId = view?.format?.collection_pointer?.id as string | undefined
+    if (collectionPointerId && !collectionPublishedFilters[collectionPointerId]) {
+      collectionPublishedFilters[collectionPointerId] = publishedFilters
     }
   }
 
@@ -60,16 +80,22 @@ function fixCollectionData(recordMap: ExtendedRecordMap) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const viewEntry = recordMap.collection_view[viewId] as any
       const view = viewEntry?.value?.value ?? viewEntry?.value
-      const propertyFilters = view?.format?.property_filters as PropertyFilter[] | undefined
+
+      // 이 뷰 자체의 필터 또는 컬렉션의 published 필터 사용
+      const viewFilters = view?.format?.property_filters as PropertyFilter[] | undefined
+      const publishedFilters = collectionPublishedFilters[collectionId]
+      const filtersToApply = viewFilters?.length ? viewFilters : publishedFilters
+
       const groupResults = data.collection_group_results
       if (!groupResults?.blockIds?.length) continue
 
-      // 1. property_filters 적용하여 collection_group_results.blockIds 교체 (모든 뷰 공통)
-      groupResults.blockIds = applyPropertyFilters(groupResults.blockIds, propertyFilters, recordMap)
+      // 1. 필터 적용하여 collection_group_results.blockIds 교체
+      if (filtersToApply?.length) {
+        groupResults.blockIds = applyPropertyFilters(groupResults.blockIds, filtersToApply, recordMap)
+      }
 
       // 2. 그룹화된 뷰: per-group 키 추가
       if (Object.keys(data).some(k => k.startsWith('results:'))) continue
-
       const groups = view?.format?.collection_groups as Array<{
         property: string
         hidden?: boolean
