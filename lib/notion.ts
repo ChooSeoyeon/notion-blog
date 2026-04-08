@@ -3,16 +3,43 @@ import type { ExtendedRecordMap } from 'notion-types'
 
 export const notion = new NotionAPI()
 
+type PropertyFilter = {
+  filter: { filter: { operator: string; value?: { value: unknown } }; property: string }
+}
+
+function applyPropertyFilters(
+  blockIds: string[],
+  propertyFilters: PropertyFilter[] | undefined,
+  recordMap: ExtendedRecordMap,
+): string[] {
+  if (!propertyFilters?.length) return blockIds
+  return blockIds.filter((blockId) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blockEntry = recordMap.block[blockId] as any
+    const block = blockEntry?.value?.value ?? blockEntry?.value
+    return propertyFilters.every(({ filter: { filter, property } }) => {
+      const propValue = block?.properties?.[property] as string[][] | undefined
+      const text = propValue?.[0]?.[0]
+      if (filter.operator === 'checkbox_is') {
+        const expected = filter.value?.value === true ? 'Yes' : 'No'
+        return text === expected
+      }
+      return true
+    })
+  })
+}
+
 /**
- * Notion API가 그룹별 reducer 결과(results:type:value)를 더 이상 반환하지 않아
- * collection_group_results의 전체 blockIds를 각 그룹 조건에 따라 직접 필터링해서 채운다.
+ * Notion API가 collection_group_results에 필터/그룹 결과를 누락하는 문제를 클라이언트에서 보정.
+ * 1. property_filters를 collection_group_results.blockIds에 직접 적용 (모든 뷰)
+ * 2. 그룹화된 뷰는 per-group 키(results:type:value)를 추가 (홈 리스트뷰용)
  */
-function fixGroupedCollectionData(recordMap: ExtendedRecordMap) {
+function fixCollectionData(recordMap: ExtendedRecordMap) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const collectionQuery = recordMap.collection_query as unknown as Record<string, Record<string, Record<string, unknown>>>
+  const collectionQuery = recordMap.collection_query as unknown as Record<string, Record<string, Record<string, any>>>
   if (!collectionQuery) return
 
-  // 각 collection_view 블록의 첫번째 뷰 ID만 수집 (두번째 뷰는 처리하지 않음)
+  // 각 collection_view 블록의 첫번째 뷰 ID만 수집
   const firstViewIds = new Set<string>()
   for (const blockEntry of Object.values(recordMap.block)) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,80 +52,52 @@ function fixGroupedCollectionData(recordMap: ExtendedRecordMap) {
 
   for (const collectionId of Object.keys(collectionQuery)) {
     for (const viewId of Object.keys(collectionQuery[collectionId] ?? {})) {
-      // 첫번째 뷰만 처리
       if (!firstViewIds.has(viewId)) continue
+
       const data = collectionQuery[collectionId][viewId]
       if (!data) continue
 
-      // 이미 per-group 키가 있으면 패스
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const viewEntry = recordMap.collection_view[viewId] as any
+      const view = viewEntry?.value?.value ?? viewEntry?.value
+      const propertyFilters = view?.format?.property_filters as PropertyFilter[] | undefined
+      const groupResults = data.collection_group_results
+      if (!groupResults?.blockIds?.length) continue
+
+      // 1. property_filters 적용하여 collection_group_results.blockIds 교체 (모든 뷰 공통)
+      groupResults.blockIds = applyPropertyFilters(groupResults.blockIds, propertyFilters, recordMap)
+
+      // 2. 그룹화된 뷰: per-group 키 추가
       if (Object.keys(data).some(k => k.startsWith('results:'))) continue
 
-      const viewEntry = recordMap.collection_view[viewId] as Record<string, unknown>
-      const view = (viewEntry?.value as Record<string, unknown>)?.value as Record<string, unknown> ?? viewEntry?.value as Record<string, unknown>
-      const groups = (view?.format as Record<string, unknown>)?.collection_groups as Array<{
+      const groups = view?.format?.collection_groups as Array<{
         property: string
         hidden?: boolean
         value: { type: string; value?: string }
       }> | undefined
-
       if (!groups?.length) continue
-
-      const rawBlockIds = (data.collection_group_results as Record<string, unknown>)?.blockIds as string[] | undefined
-      if (!rawBlockIds?.length) continue
-
-      // 뷰의 property_filters를 클라이언트에서 직접 적용 (Notion API가 필터를 누락하는 경우 대비)
-      const propertyFilters = (view?.format as Record<string, unknown>)?.property_filters as Array<{
-        filter: { filter: { operator: string; value?: { value: unknown } }; property: string }
-      }> | undefined
-
-      const allBlockIds = propertyFilters?.length
-        ? rawBlockIds.filter((blockId) => {
-            const blockEntry = recordMap.block[blockId] as Record<string, unknown>
-            const block = ((blockEntry?.value as Record<string, unknown>)?.value ?? blockEntry?.value) as Record<string, unknown>
-            return propertyFilters.every(({ filter: { filter, property } }) => {
-              const propValue = (block?.properties as Record<string, string[][]>)?.[property]
-              const text = propValue?.[0]?.[0]
-              if (filter.operator === 'checkbox_is') {
-                const expected = filter.value?.value === true ? 'Yes' : 'No'
-                return text === expected
-              }
-              return true
-            })
-          })
-        : rawBlockIds
-
-      if (!allBlockIds.length) continue
 
       for (const group of groups) {
         const { property, value: { value: groupValue, type } } = group
         const queryLabel = groupValue ?? 'uncategorized'
         const key = `results:${type}:${queryLabel}`
-
         if (data[key]) continue
 
-        const groupBlockIds = allBlockIds.filter((blockId: string) => {
-          const blockEntry = recordMap.block[blockId] as Record<string, unknown>
-          const block = ((blockEntry?.value as Record<string, unknown>)?.value ?? blockEntry?.value) as Record<string, unknown>
-          const propValue = (block?.properties as Record<string, unknown[][]>)?.[property] as string[][] | undefined
-
+        const groupBlockIds = groupResults.blockIds.filter((blockId: string) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const blockEntry = recordMap.block[blockId] as any
+          const block = blockEntry?.value?.value ?? blockEntry?.value
+          const propValue = block?.properties?.[property] as string[][] | undefined
           if (!propValue?.length) return groupValue === undefined
-
           if (groupValue === undefined) return false
-
-          // multi_select: "VALUE1,VALUE2" 처럼 콤마로 구분된 문자열 또는 개별 세그먼트 모두 처리
           return propValue.some((seg) => {
-            const text = seg[0] as string
+            const text = seg[0]
             if (!text) return false
-            return text === groupValue || text.split(',').some((v) => v.trim() === groupValue)
+            return text === groupValue || text.split(',').some((v: string) => v.trim() === groupValue)
           })
         })
 
-        data[key] = {
-          type: 'results',
-          blockIds: groupBlockIds,
-          total: groupBlockIds.length,
-          hasMore: false,
-        }
+        data[key] = { type: 'results', blockIds: groupBlockIds, total: groupBlockIds.length, hasMore: false }
       }
     }
   }
@@ -106,6 +105,6 @@ function fixGroupedCollectionData(recordMap: ExtendedRecordMap) {
 
 export async function getPageRecordMap(pageId: string) {
   const recordMap = await notion.getPage(pageId)
-  fixGroupedCollectionData(recordMap)
+  fixCollectionData(recordMap)
   return recordMap
 }
