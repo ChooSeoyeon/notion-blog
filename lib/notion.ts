@@ -12,8 +12,21 @@ function fixGroupedCollectionData(recordMap: ExtendedRecordMap) {
   const collectionQuery = recordMap.collection_query as unknown as Record<string, Record<string, Record<string, unknown>>>
   if (!collectionQuery) return
 
+  // 각 collection_view 블록의 첫번째 뷰 ID만 수집 (두번째 뷰는 처리하지 않음)
+  const firstViewIds = new Set<string>()
+  for (const blockEntry of Object.values(recordMap.block)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const block = ((blockEntry as any)?.value as any)?.value ?? (blockEntry as any)?.value
+    if (block?.type === 'collection_view' || block?.type === 'collection_view_page') {
+      const viewIds = block.view_ids as string[] | undefined
+      if (viewIds?.length) firstViewIds.add(viewIds[0])
+    }
+  }
+
   for (const collectionId of Object.keys(collectionQuery)) {
     for (const viewId of Object.keys(collectionQuery[collectionId] ?? {})) {
+      // 첫번째 뷰만 처리
+      if (!firstViewIds.has(viewId)) continue
       const data = collectionQuery[collectionId][viewId]
       if (!data) continue
 
