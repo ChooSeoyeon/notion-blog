@@ -9,10 +9,10 @@
   },
   "dependencies": {
     "next": "16.1.7",
-    "notion-client": "^7.10.0",
+    "notion-client": "^7.8.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-notion-x": "^7.10.0"
+    "react-notion-x": "^7.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
